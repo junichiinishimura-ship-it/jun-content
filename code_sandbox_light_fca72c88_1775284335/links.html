@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>LinkStock - アイデアストック</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --primary-color: #ff0000;
+            --secondary-color: #282828;
+            --accent-color: #065fd4;
+        }
+        body { background-color: #f8f9fa; font-family: 'Noto Sans JP', sans-serif; }
+
+        /* ナビバー */
+        .navbar { background-color: var(--secondary-color); box-shadow: 0 2px 4px rgba(0,0,0,.1); }
+        .navbar-brand { color: white !important; font-weight: bold; }
+
+        /* 統計カード */
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 20px; }
+        .stat-card { background: #fff; padding: 20px; border-radius: 12px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,.1); }
+        .stat-number { font-size: 1.8rem; font-weight: 700; color: var(--primary-color); }
+        .stat-label { color: #6c757d; font-size: .85rem; margin-top: 4px; }
+
+        /* 検索セクション */
+        .search-section { background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.1); padding: 20px 24px; margin-bottom: 20px; }
+        .search-box { position: relative; margin-bottom: 16px; }
+        .search-input { width: 100%; padding: 10px 40px 10px 14px; border: 1px solid #dee2e6; border-radius: 8px; font-size: .95rem; }
+        .search-input:focus { outline: none; border-color: var(--primary-color); box-shadow: 0 0 0 .2rem rgba(255,0,0,.15); }
+        .search-icon { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); color: #adb5bd; }
+
+        /* フィルターボタン */
+        .filter-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+        .filter-btn { padding: 6px 16px; border: 1px solid #dee2e6; background: #fff; border-radius: 20px; cursor: pointer; font-size: .875rem; font-weight: 500; color: #495057; transition: all .2s; }
+        .filter-btn:hover { border-color: var(--primary-color); color: var(--primary-color); }
+        .filter-btn.active { background-color: var(--primary-color); color: white; border-color: var(--primary-color); }
+
+        /* 追加ボタン */
+        .add-link-btn { background-color: var(--primary-color); color: white; border: none; padding: 8px 20px; border-radius: 8px; font-weight: 500; font-size: .875rem; cursor: pointer; transition: background-color .2s; }
+        .add-link-btn:hover { background-color: #cc0000; }
+
+        /* リンクカード */
+        .link-card { background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.1); padding: 20px; margin-bottom: 16px; position: relative; transition: transform .2s, box-shadow .2s; }
+        .link-card:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,.15); }
+        .link-card.favorite { border-left: 4px solid #ffd700; }
+        .link-icon { width: 48px; height: 48px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; margin-right: 16px; flex-shrink: 0; background-color: var(--secondary-color); color: white; }
+        .link-content h5 { font-weight: 600; margin-bottom: 4px; color: #212529; font-size: 1rem; }
+        .link-content p { color: #6c757d; margin-bottom: 8px; font-size: .9rem; line-height: 1.5; }
+        .link-url { color: var(--accent-color); font-size: .85rem; word-break: break-all; text-decoration: none; }
+        .link-url:hover { text-decoration: underline; }
+
+        /* アクションボタン */
+        .action-buttons { position: absolute; top: 16px; right: 16px; display: flex; gap: 6px; opacity: 0; transition: opacity .2s; }
+        .link-card:hover .action-buttons { opacity: 1; }
+        .btn-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; border: 1px solid #dee2e6; background: #fff; color: #495057; cursor: pointer; transition: transform .15s, box-shadow .15s; font-size: .85rem; }
+        .btn-icon:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,.12); }
+        .btn-icon.edit:hover { color: var(--accent-color); border-color: var(--accent-color); }
+        .btn-icon.delete:hover { color: #dc3545; border-color: #dc3545; }
+        .btn-icon.favorite:hover { color: #ffc107; border-color: #ffc107; }
+        .favorite .bi-star-fill { color: #ffd700; }
+
+        /* 空状態 */
+        .empty-state { text-align: center; padding: 60px 20px; color: #adb5bd; background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.1); }
+        .empty-state i { font-size: 3.5rem; margin-bottom: 16px; display: block; opacity: .5; }
+        .empty-state h4 { color: #6c757d; margin-bottom: 8px; }
+
+        /* モーダル */
+        .modal-header { background-color: var(--secondary-color); color: white; }
+        .form-control:focus, .form-select:focus { border-color: var(--primary-color); box-shadow: 0 0 0 .2rem rgba(255,0,0,.25); }
+        .btn-primary { background-color: var(--primary-color); border-color: var(--primary-color); }
+        .btn-primary:hover { background-color: #cc0000; border-color: #cc0000; }
+
+        /* トースト */
+        .toast-container { position: fixed; top: 20px; right: 20px; z-index: 9999; }
+
+        /* ショートカットヒント */
+        .shortcut-hint { position: fixed; bottom: 20px; right: 20px; background: rgba(40,40,40,.85); color: #fff; border-radius: 10px; padding: 10px 16px; font-size: .78rem; z-index: 1000; pointer-events: none; }
+        .shortcut-hint kbd { background: rgba(255,255,255,.2); border-radius: 4px; padding: 1px 6px; font-family: monospace; }
+    </style>
+    <script src="js/auth.js"></script>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark sticky-top">
+        <div class="container">
+            <a class="navbar-brand" href="#">
+                <i class="bi bi-link-45deg me-2"></i>LinkStock
+            </a>
+            <div class="d-flex gap-2">
+                <a href="index.html" class="btn btn-outline-light"><i class="bi bi-youtube me-1"></i>YouTube管理</a>
+                <a href="editors.html" class="btn btn-outline-light"><i class="bi bi-people me-1"></i>編集者</a>
+                <a href="course.html" class="btn btn-outline-light"><i class="bi bi-mortarboard me-1"></i>講座管理</a>
+                <a href="bonus.html" class="btn btn-outline-light"><i class="bi bi-gift me-1"></i>無料特典管理</a>
+                <div class="vr bg-secondary opacity-50 mx-1"></div>
+                <button class="btn btn-outline-warning btn-sm" onclick="backupToExcel()" title="全データをExcelでバックアップ">
+                    <i class="bi bi-download me-1"></i>バックアップ
+                </button>
+                <button class="btn btn-outline-info btn-sm" onclick="restoreFromExcel()" title="Excelファイルからリストア">
+                    <i class="bi bi-upload me-1"></i>リストア
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container py-4">
+        <!-- 統計 -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-number" id="totalLinks">0</div>
+                <div class="stat-label">総リンク数</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="favoriteLinks">0</div>
+                <div class="stat-label">お気に入り</div>
+            </div>
+        </div>
+
+        <!-- 検索・フィルター -->
+        <div class="search-section">
+            <div class="search-box">
+                <input type="text" class="search-input" id="searchInput" placeholder="タイトル・メモ・URLで検索..." oninput="filterLinks()">
+                <i class="bi bi-search search-icon"></i>
+            </div>
+            <div class="filter-buttons">
+                <button class="filter-btn active" onclick="filterByCategory('all', event)">すべて</button>
+                <button class="filter-btn" onclick="filterByCategory('favorite', event)">⭐ お気に入り</button>
+            </div>
+            <div class="d-flex justify-content-between align-items-center">
+                <span class="text-muted small">見つかったリンク: <span id="filteredCount">0</span>件</span>
+                <button class="add-link-btn" onclick="showAddLinkModal()">
+                    <i class="bi bi-plus-circle me-2"></i>新規リンク追加
+                </button>
+            </div>
+        </div>
+
+        <!-- リンク一覧 -->
+        <div id="linksContainer">
+            <div class="empty-state">
+                <i class="bi bi-inbox"></i>
+                <h4>まだリンクが登録されていません</h4>
+                <p class="mb-4">アイデアや参考URLをストックしましょう！</p>
+                <button class="add-link-btn" onclick="showAddLinkModal()">
+                    <i class="bi bi-plus-circle me-2"></i>最初のリンクを追加
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- モーダル -->
+    <div class="modal fade" id="linkModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalTitle">新規リンク追加</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="linkId">
+                    <div class="mb-3">
+                        <label class="form-label">タイトル <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="linkTitle">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">URL <span class="text-danger">*</span></label>
+                        <input type="url" class="form-control" id="linkUrl" placeholder="https://example.com">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">メモ</label>
+                        <textarea class="form-control" id="linkDescription" rows="3" placeholder="アイデアのメモ、参考点など..."></textarea>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="isFavorite">
+                        <label class="form-check-label" for="isFavorite">
+                            <i class="bi bi-star-fill text-warning me-1"></i>お気に入りに追加
+                        </label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="button" class="btn btn-primary" onclick="saveLink()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast-container"></div>
+
+    <div class="shortcut-hint">
+        <i class="bi bi-keyboard me-1"></i><kbd>N</kbd> 新規追加
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="js/jsonbin.js"></script>
+    <script src="js/backup.js"></script>
+<script src="js/links.js"></script>
+    <script>
+        document.addEventListener('keydown', (e) => {
+            if (document.querySelector('.modal.show')) return;
+            if (['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
+            if (e.key === 'n' && !e.ctrlKey && !e.metaKey) {
+                e.preventDefault();
+                showAddLinkModal();
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>講座管理</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --primary-color: #ff0000;
+            --secondary-color: #282828;
+            --accent-color: #065fd4;
+            --ec-color: #ff0000;
+            --ec-dark: #cc0000;
+        }
+
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Noto Sans JP', sans-serif;
+        }
+
+        /* ===== ナビバー ===== */
+        .navbar {
+            background-color: var(--secondary-color);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .navbar-brand { color: white !important; font-weight: bold; }
+
+        /* ===== カード ===== */
+        .card {
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.09);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        /* ===== コースカード ===== */
+        .course-card {
+            cursor: pointer;
+            border-left: 4px solid var(--ec-color) !important;
+            transition: transform 0.18s, box-shadow 0.18s, border-color 0.18s;
+        }
+        .course-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.13);
+        }
+        .course-card.active-course {
+            border-left-color: var(--ec-dark) !important;
+            background: #fff8f0;
+            box-shadow: 0 0 0 2px var(--ec-color), 0 4px 16px rgba(230,126,34,0.15);
+        }
+        .course-card .drag-handle {
+            cursor: grab;
+            color: #adb5bd;
+            font-size: 1.1rem;
+            padding: 2px 6px;
+        }
+        .course-card .drag-handle:active { cursor: grabbing; }
+
+        /* ===== ステータスバッジ ===== */
+        .status-badge {
+            padding: 0.35rem 0.85rem;
+            border-radius: 20px;
+            font-size: 0.82rem;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+        .status-planning  { background: #e3f2fd; color: #1976d2; }
+        .status-recording { background: #fff3e0; color: #f57c00; }
+        .status-editing   { background: #f3e5f5; color: #7b1fa2; }
+        .status-review    { background: #e8f5e9; color: #388e3c; }
+        .status-published { background: #e8f5e9; color: #4caf50; }
+
+        /* ===== 動画リスト ===== */
+        .video-item {
+            background: #fff;
+            border: 1px solid #e9ecef;
+            border-radius: 10px;
+            padding: 14px 16px;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            transition: box-shadow 0.15s, background 0.15s;
+        }
+        .video-item:hover { box-shadow: 0 3px 12px rgba(0,0,0,0.09); background: #fafafa; }
+        .video-item .drag-handle {
+            cursor: grab;
+            color: #adb5bd;
+            font-size: 1.1rem;
+            flex-shrink: 0;
+        }
+        .video-item .drag-handle:active { cursor: grabbing; }
+        .video-item.dragging {
+            opacity: 0.4;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+        }
+        .video-item.drag-over {
+            border-color: var(--ec-color);
+            background: #fff8f0;
+        }
+
+        /* ===== 進捗バー ===== */
+        .progress { height: 6px; border-radius: 4px; }
+        .progress-bar { background-color: var(--primary-color); }
+
+        /* ===== モーダル ===== */
+        .modal-header {
+            background-color: var(--secondary-color);
+            color: white;
+        }
+        .form-control:focus, .form-select:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 0.2rem rgba(255,0,0,0.2);
+        }
+
+        /* ===== 台本 ===== */
+        .script-section {
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            padding: 12px;
+            margin-bottom: 10px;
+            background: #f9fafb;
+        }
+        .script-section h6 { font-weight: 600; margin-bottom: 6px; }
+
+        /* ===== アクションボタン ===== */
+        .action-btn {
+            transition: transform 0.15s, box-shadow 0.15s;
+            border-radius: 7px !important;
+        }
+        .action-btn:hover {
+            transform: translateY(-2px) scale(1.1);
+            box-shadow: 0 4px 10px rgba(0,0,0,0.12);
+        }
+        .action-btn:active { transform: scale(0.95); }
+
+        /* ===== 空状態 ===== */
+        .empty-state {
+            text-align: center;
+            padding: 48px 20px;
+            color: #adb5bd;
+        }
+        .empty-state i { font-size: 3rem; margin-bottom: 12px; display: block; }
+
+        /* ===== コース一覧ドラッグ ===== */
+        .course-card.dragging { opacity: 0.4; }
+        .course-card.drag-over { outline: 2px dashed var(--ec-color); }
+        /* 動画ドロップ受け入れ中のコースカード */
+        .course-card.drop-target {
+            outline: 3px solid var(--primary-color) !important;
+            background: #fff5f5 !important;
+            transform: scale(1.02);
+            box-shadow: 0 4px 16px rgba(255,0,0,0.2);
+        }
+
+        /* ===== ツールチップ ===== */
+        /* JS側で制御 */
+
+        /* ===== ショートカットヒント ===== */
+        .shortcut-hint {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(40,40,40,0.85);
+            color: #fff;
+            border-radius: 10px;
+            padding: 10px 16px;
+            font-size: 0.78rem;
+            z-index: 1000;
+            pointer-events: none;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.2);
+        }
+        .shortcut-hint kbd {
+            background: rgba(255,255,255,0.2);
+            border-radius: 4px;
+            padding: 1px 6px;
+            font-family: monospace;
+        }
+
+        /* ===== レスポンシブ ===== */
+        @media (max-width: 768px) {
+            .video-item { flex-wrap: wrap; }
+            .video-meta { width: 100%; }
+        }
+    </style>
+    <script src="js/auth.js"></script>
+</head>
+<body>
+
+    <!-- ナビバー -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container">
+            <a class="navbar-brand" href="#">
+                <i class="bi bi-mortarboard me-2"></i>講座管理
+            </a>
+            <div class="d-flex gap-2 flex-wrap">
+                <a href="index.html" class="btn btn-outline-light btn-sm">
+                    <i class="bi bi-youtube me-1"></i>YouTube管理
+                </a>
+                <a href="links.html" class="btn btn-outline-light btn-sm">
+                    <i class="bi bi-link-45deg me-1"></i>リンクストック
+                </a>
+                <a href="bonus.html" class="btn btn-outline-light btn-sm">
+                    <i class="bi bi-gift me-1"></i>無料特典管理
+                </a>
+                <a href="editors.html" class="btn btn-outline-light btn-sm">
+                    <i class="bi bi-people me-1"></i>編集者
+                </a>
+                <div class="vr bg-secondary opacity-50 mx-1"></div>
+                <button class="btn btn-outline-warning btn-sm" onclick="backupToExcel()" title="全データをExcelでバックアップ">
+                    <i class="bi bi-download me-1"></i>バックアップ
+                </button>
+                <button class="btn btn-outline-info btn-sm" onclick="restoreFromExcel()" title="Excelファイルからリストア">
+                    <i class="bi bi-upload me-1"></i>リストア
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+
+        <!-- 進捗サマリー -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title mb-3">進捗サマリー</h5>
+                        <div class="row text-center g-2">
+                            <div class="col-6 col-md-2">
+                                <div class="text-muted small">コース数</div>
+                                <div class="h4 fw-bold" id="sum-courses" style="color:var(--ec-color)">0</div>
+                            </div>
+                            <div class="col-6 col-md-2">
+                                <div class="text-muted small">動画総数</div>
+                                <div class="h4 fw-bold text-dark" id="sum-videos">0</div>
+                            </div>
+                            <div class="col-6 col-md-2">
+                                <div class="text-muted small">計画中</div>
+                                <div class="h4 text-primary" id="sum-planning">0</div>
+                            </div>
+                            <div class="col-6 col-md-2">
+                                <div class="text-muted small">収録〜編集中</div>
+                                <div class="h4 text-warning" id="sum-inprogress">0</div>
+                            </div>
+                            <div class="col-6 col-md-2">
+                                <div class="text-muted small">レビュー中</div>
+                                <div class="h4 text-info" id="sum-review">0</div>
+                            </div>
+                            <div class="col-6 col-md-2">
+                                <div class="text-muted small">公開済み</div>
+                                <div class="h4 text-success" id="sum-published">0</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-4">
+            <!-- 左カラム：コース一覧 -->
+            <div class="col-lg-4">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="bi bi-collection me-2"></i>コース一覧</h5>
+                        <div class="d-flex gap-1">
+                            <button class="btn btn-sm text-white" style="background:var(--ec-color);" onclick="courseManager.showAddCourseModal()">
+                                <i class="bi bi-plus-circle me-1"></i>追加
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body p-2" id="courseList">
+                        <div class="empty-state" id="courseEmptyState">
+                            <i class="bi bi-collection"></i>
+                            <div>コースがありません</div>
+                            <small>「追加」からコースを作成してください</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右カラム：動画一覧 -->
+            <div class="col-lg-8">
+                <div class="card">
+                    <!-- 選択前のプレースホルダー -->
+                    <div id="noCourseSelected">
+                        <div class="card-body empty-state" style="padding: 80px 20px;">
+                            <i class="bi bi-arrow-left-circle"></i>
+                            <div class="fs-5 fw-semibold mb-1">コースを選択してください</div>
+                            <small>左のコース一覧からコースを選ぶと動画が表示されます</small>
+                        </div>
+                    </div>
+
+                    <!-- 選択後の動画一覧 -->
+                    <div id="courseDetail" style="display:none;">
+                        <div class="card-header">
+                            <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+                                <div>
+                                    <h5 class="mb-0" id="detailCourseTitle">コースタイトル</h5>
+                                    <small class="text-muted" id="detailCourseDesc"></small>
+                                </div>
+                                <div class="d-flex gap-2 flex-wrap">
+                                    <button class="btn btn-sm btn-outline-secondary action-btn" onclick="courseManager.editCourse(courseManager.selectedCourseId)" data-tooltip="コース情報を編集">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button class="btn btn-sm text-white action-btn" style="background:var(--ec-color);" onclick="courseManager.showAddVideoModal()" data-tooltip="この講座に動画を追加">
+                                        <i class="bi bi-plus-circle me-1"></i>動画を追加
+                                    </button>
+                                </div>
+                            </div>
+                            <!-- タブ：進行中 / 公開済み -->
+                            <ul class="nav nav-tabs border-0 mt-3" id="videoTabs" style="margin-bottom:-1px;">
+                                <li class="nav-item">
+                                    <button class="nav-link active fw-semibold px-3 py-2" id="tab-active-btn" data-bs-toggle="tab" data-bs-target="#tab-active" type="button">
+                                        <i class="bi bi-play-circle me-1"></i>進行中
+                                        <span class="badge bg-secondary ms-1" id="badge-active">0</span>
+                                    </button>
+                                </li>
+                                <li class="nav-item">
+                                    <button class="nav-link fw-semibold px-3 py-2" id="tab-published-btn" data-bs-toggle="tab" data-bs-target="#tab-published" type="button">
+                                        <i class="bi bi-check-circle me-1"></i>公開済み
+                                        <span class="badge bg-success ms-1" id="badge-published">0</span>
+                                    </button>
+                                </li>
+                            </ul>
+                        </div>
+
+                        <div class="card-body">
+                            <div class="tab-content">
+                                <!-- 進行中タブ -->
+                                <div class="tab-pane fade show active" id="tab-active">
+                                    <div id="activeVideoList"></div>
+                                </div>
+                                <!-- 公開済みタブ -->
+                                <div class="tab-pane fade" id="tab-published">
+                                    <div id="publishedVideoList"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== コース追加・編集モーダル ===== -->
+    <div class="modal fade" id="courseModal" tabindex="-1">
+        <div class="modal-dialog modal-md">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="courseModalTitle">コース追加</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="courseId">
+                    <div class="mb-3">
+                        <label class="form-label">コース名 <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="courseTitle" placeholder="例：ゼロからわかるSNSマーケティング講座">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">説明</label>
+                        <textarea class="form-control" id="courseDescription" rows="3" placeholder="コースの概要を入力..."></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">ステータス</label>
+                        <select class="form-select" id="courseStatus">
+                            <option value="draft">下書き</option>
+                            <option value="active">公開中</option>
+                            <option value="archived">アーカイブ</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="button" class="btn text-white" style="background:var(--ec-color);" onclick="courseManager.saveCourse()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== 動画追加・編集モーダル ===== -->
+    <div class="modal fade" id="videoModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="videoModalTitle">動画追加</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="videoId">
+                    <div class="mb-3">
+                        <label class="form-label">所属コース</label>
+                        <select class="form-select" id="videoCourseId"></select>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-8">
+                            <div class="mb-3">
+                                <label class="form-label">動画タイトル <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="videoTitle" placeholder="例：第1章 はじめに">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">説明</label>
+                                <textarea class="form-control" id="videoDescription" rows="3"></textarea>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">格納動画URL</label>
+                                <input type="url" class="form-control" id="videoUrl" placeholder="https://...">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">資料URL</label>
+                                <input type="url" class="form-control" id="videoMaterialUrl" placeholder="https://...">
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label class="form-label">ステータス</label>
+                                <select class="form-select" id="videoStatus" onchange="courseManager.updateProgressPreview()">
+                                    <option value="planning">計画中</option>
+                                    <option value="recording">収録中</option>
+                                    <option value="editing">編集中</option>
+                                    <option value="review">レビュー中</option>
+                                    <option value="published">公開済み</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">予算（円）</label>
+                                <input type="number" class="form-control" id="videoBudget" placeholder="20000" min="0" step="100">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">担当編集者（複数選択可）</label>
+                        <div class="border rounded p-2" id="videoEditorChecklist" style="max-height:140px; overflow-y:auto; background:#fff;">
+                            <div class="text-muted small">読み込み中...</div>
+                        </div>
+                    </div>
+                    <div class="mb-1">
+                        <label class="form-label">進捗</label>
+                        <div class="progress mb-1">
+                            <div class="progress-bar" id="videoProgressBar" role="progressbar" style="width:20%"></div>
+                        </div>
+                        <small class="text-muted">進捗: <span id="videoProgressText">20%</span></small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="button" class="btn text-white" style="background:var(--ec-color);" onclick="courseManager.saveVideo()">保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== 台本モーダル ===== -->
+    <div class="modal fade" id="scriptModal" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div>
+                        <h5 class="modal-title mb-0">台本編集</h5>
+                        <small class="text-white opacity-75" id="scriptModalVideoTitle"></small>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <!-- ツールバー -->
+                <div class="d-flex align-items-center gap-2 px-3 py-2 border-bottom bg-light flex-wrap">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="courseManager.scriptInsert('bold')" title="太字"><b>B</b></button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="courseManager.scriptInsert('heading')" title="見出し"><i class="bi bi-type-h2"></i></button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="courseManager.scriptInsert('bullet')" title="箇条書き"><i class="bi bi-list-ul"></i></button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="courseManager.scriptInsert('hr')" title="区切り線"><i class="bi bi-dash-lg"></i></button>
+                    <div class="vr"></div>
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="courseManager.scriptInsertImage()" title="URL指定で画像挿入">
+                        <i class="bi bi-image me-1"></i>URL挿入
+                    </button>
+                    <label class="btn btn-sm btn-outline-success mb-0" title="ファイルを選択してアップロード" style="cursor:pointer;">
+                        <i class="bi bi-upload me-1"></i>ファイル選択
+                        <input type="file" id="scriptFileInput" accept="image/*" style="display:none;" onchange="courseManager._onFileInputChange(event)">
+                    </label>
+                    <div class="vr"></div>
+                    <div class="form-check form-switch mb-0 ms-auto">
+                        <input class="form-check-input" type="checkbox" id="scriptPreviewToggle" onchange="courseManager.toggleScriptPreview(this.checked)">
+                        <label class="form-check-label small" for="scriptPreviewToggle">プレビュー</label>
+                    </div>
+                </div>
+                <div class="modal-body p-0" style="position:relative;">
+                    <input type="hidden" id="scriptVideoId">
+                    <!-- ドラッグ中オーバーレイ -->
+                    <div id="scriptDropOverlay" style="display:none; position:absolute; inset:0; z-index:100; background:rgba(13,110,253,.13); border:3px dashed #0d6efd; border-radius:0; align-items:center; justify-content:center; flex-direction:column; gap:10px; pointer-events:none;">
+                        <i class="bi bi-cloud-upload" style="font-size:3rem; color:#0d6efd;"></i>
+                        <div style="font-size:1.1rem; font-weight:600; color:#0d6efd;">ここにドロップして画像をアップロード</div>
+                        <div style="font-size:.85rem; color:#555;">JPG / PNG / GIF / WebP 対応</div>
+                    </div>
+                    <!-- アップロード中オーバーレイ -->
+                    <div id="scriptUploadingOverlay" style="display:none; position:absolute; inset:0; z-index:101; background:rgba(255,255,255,.88); align-items:center; justify-content:center; flex-direction:column; gap:14px;">
+                        <div class="spinner-border text-primary" style="width:2.5rem;height:2.5rem;"></div>
+                        <div style="font-size:1rem; font-weight:600; color:#333;">Cloudinaryにアップロード中...</div>
+                        <div style="font-size:.85rem; color:#777;" id="scriptUploadFileName"></div>
+                    </div>
+                    <textarea id="scriptTextarea" class="form-control border-0 rounded-0"
+                        style="min-height:65vh; resize:none; font-size:0.95rem; line-height:1.8; padding:20px 24px; font-family:inherit;"
+                        placeholder="台本をここに自由に入力してください...&#10;&#10;## 見出し&#10;**太字**&#10;![画像タイトル](画像URL)&#10;&#10;💡 画像ファイルをここにドラッグ&ドロップでアップロードできます"></textarea>
+                    <div id="scriptPreview" style="display:none; min-height:65vh; padding:20px 24px; font-size:0.95rem; line-height:1.8; overflow-y:auto;"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">閉じる</button>
+                    <button type="button" class="btn btn-primary" onclick="courseManager.saveScript()">台本を保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== 画像挿入ダイアログ（台本用） ===== -->
+    <div id="imageInsertDialog" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:9999; align-items:center; justify-content:center;">
+        <div style="background:#fff; border-radius:12px; width:min(520px,94vw); box-shadow:0 8px 32px rgba(0,0,0,.25); overflow:hidden;">
+            <div style="background:var(--ec-color); color:#fff; padding:14px 20px; display:flex; align-items:center; justify-content:space-between;">
+                <span style="font-weight:600; font-size:1rem;"><i class="bi bi-image me-2"></i>画像を挿入</span>
+                <button type="button" onclick="courseManager._closeImageDialog()" style="background:none; border:none; color:#fff; font-size:1.3rem; cursor:pointer; line-height:1;">&times;</button>
+            </div>
+            <div style="padding:20px;">
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">画像URL <span class="text-danger">*</span></label>
+                    <div class="input-group">
+                        <input type="url" id="imgUrlInput" class="form-control" placeholder="https://example.com/image.png"
+                            oninput="courseManager._previewImage()">
+                        <button class="btn btn-outline-secondary" type="button" onclick="courseManager._previewImage()">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                    </div>
+                    <div class="form-text">画像の直リンクURLを貼り付けてください</div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">画像の説明（任意）</label>
+                    <input type="text" id="imgAltInput" class="form-control" placeholder="例：フローチャート図">
+                </div>
+                <!-- プレビュー -->
+                <div id="imgPreviewWrap" style="background:#f8f9fa; border-radius:8px; padding:10px; min-height:80px; display:flex; align-items:center; justify-content:center; margin-bottom:12px; border:1px dashed #ccc;">
+                    <img id="imgPreview" style="display:none; max-width:100%; max-height:200px; border-radius:6px;"
+                        onerror="this.style.display='none'; document.getElementById('imgPreviewError').style.display='block'">
+                    <span id="imgPreviewError" style="display:none; color:#dc3545; font-size:.85rem;"><i class="bi bi-exclamation-triangle me-1"></i>画像を読み込めません</span>
+                    <span id="imgPreviewEmpty" style="color:#aaa; font-size:.85rem;">URLを入力するとプレビューが表示されます</span>
+                </div>
+            </div>
+            <div style="padding:0 20px 20px; display:flex; gap:10px; justify-content:flex-end;">
+                <button type="button" class="btn btn-secondary" onclick="courseManager._closeImageDialog()">キャンセル</button>
+                <button type="button" class="btn btn-primary" onclick="courseManager._confirmImageInsert()">
+                    <i class="bi bi-check-lg me-1"></i>挿入
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== 削除確認モーダル ===== -->
+    <div class="modal fade" id="deleteConfirmModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered" style="max-width:420px">
+            <div class="modal-content">
+                <div class="modal-header" style="background:#c0392b; color:white;">
+                    <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-2"></i>削除の確認</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-1">以下を削除しますか？</p>
+                    <p class="fw-bold text-danger" id="deleteTargetTitle"></p>
+                    <p class="text-muted small mb-0" id="deleteTargetNote">この操作は元に戻せません。</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+                    <button type="button" class="btn btn-danger" id="confirmDeleteBtn">
+                        <i class="bi bi-trash me-1"></i>削除する
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ショートカットヒント（常時表示） -->
+    <div class="shortcut-hint">
+        <i class="bi bi-keyboard me-1"></i>
+        <kbd>N</kbd> コース追加
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="js/jsonbin.js"></script>
+    <script src="js/backup.js"></script>
+<script src="js/course.js"></script>
+    <script>
+        document.addEventListener('keydown', (e) => {
+            if (document.querySelector('.modal.show')) return;
+            if (['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
+            if (e.key === 'n' && !e.ctrlKey && !e.metaKey) {
+                e.preventDefault();
+                courseManager?.showAddCourseModal();
+            }
+        });
+    </script>
+</body>
+</html>
