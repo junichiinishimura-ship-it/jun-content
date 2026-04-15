@@ -1,34 +1,20 @@
 /**
  * JSONBin.io を使った共有データストレージ
  * 
- * v3: localStorage キャッシュ + バックグラウンド同期 + 自動リロード
- *   - キャッシュがあれば即返す（高速表示）
- *   - 裏でJSONBinから最新を取得
- *   - データに変更があればキャッシュ更新 → ページ自動リロード（キャッシュから即表示なので一瞬）
- *   - データに変更がなければ何もしない
- * 
- * データ構造（1つのBINにまとめて保存）:
- * {
- *   videos: [...],
- *   editors: [...],
- *   links: [...],
- *   ec_courses: [...],
- *   ec_course_videos: [...],
- *   bonus_groups: [...],
- *   bonus_items: [...]
- * }
+ * v3.1: localStorage キャッシュ + バックグラウンド同期 + 空キャッシュ自動スキップ
+ *   - キャッシュがあり中身もあれば即返す（高速表示）
+ *   - キャッシュが空（データ0件）なら無視してJSONBinから取得
+ *   - 裏でJSONBinから最新を取得し、変更があればページ自動リロード
  */
 
 const JSONBIN_BIN_ID  = '69a6c94bae596e708f5acd85';
 const JSONBIN_API_KEY = '$2a$10$AvmWUg6WVIQyDh8CBFaWFOx40lKAW6cLjXrK97I2AmsG80a.4IOtO';
 const JSONBIN_BASE    = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`;
 
-// ---- localStorage キャッシュ設定 ----
 const LS_DATA_KEY    = 'jb_cache_data';
 const LS_TS_KEY      = 'jb_cache_ts';
 const REQUIRED_KEYS  = ['videos','editors','links','ec_courses','ec_course_videos','bonus_groups','bonus_items'];
 
-// メモリキャッシュ
 let _cache = null;
 let _saving = false;
 let _pendingSave = false;
@@ -42,6 +28,14 @@ function _lsRead() {
         if (!raw) return null;
         const data = JSON.parse(raw);
         REQUIRED_KEYS.forEach(k => { if (!Array.isArray(data[k])) data[k] = []; });
+
+        // 中身が全て空なら「キャッシュなし」扱い
+        const totalItems = REQUIRED_KEYS.reduce((sum, k) => sum + data[k].length, 0);
+        if (totalItems === 0) {
+            console.log('⚠️ キャッシュは空データ → スキップ');
+            return null;
+        }
+
         return data;
     } catch (e) {
         console.warn('localStorageキャッシュ読み込み失敗:', e);
@@ -59,14 +53,11 @@ function _lsWrite(data) {
 }
 
 // ---- バックグラウンド同期 ----
-// データが変わっていたらキャッシュ更新 → ページリロード（キャッシュから即表示）
-// データが同じなら何もしない
 
 function _bgRefresh() {
     if (_bgRefreshDone) return;
     _bgRefreshDone = true;
 
-    // 直前にバックグラウンド同期でリロードした場合はスキップ（ループ防止）
     if (sessionStorage.getItem('jb_bg_reloaded')) {
         sessionStorage.removeItem('jb_bg_reloaded');
         console.log('🔄 バックグラウンド同期後のリロード完了');
@@ -84,7 +75,6 @@ function _bgRefresh() {
         const fresh = json.record || {};
         REQUIRED_KEYS.forEach(k => { if (!Array.isArray(fresh[k])) fresh[k] = []; });
 
-        // 現在のキャッシュと比較
         const oldStr = JSON.stringify(_cache);
         const newStr = JSON.stringify(fresh);
 
@@ -93,7 +83,6 @@ function _bgRefresh() {
             return;
         }
 
-        // データが変わっている → キャッシュ更新してリロード
         console.log('🔄 新しいデータを検出 → リロードします');
         _cache = fresh;
         _lsWrite(fresh);
@@ -107,20 +96,17 @@ function _bgRefresh() {
 
 // ---- コアAPI ----
 
-/** BIN全体を読み込む */
 async function jbLoad() {
-    // 1) localStorageキャッシュがあれば即採用
     const lsData = _lsRead();
     if (lsData) {
         _cache = lsData;
         console.log('⚡ キャッシュから即時ロード');
-        // バックグラウンドで最新チェック（awaitしない）
         _bgRefresh();
         return _cache;
     }
 
-    // 2) キャッシュなし → JSONBinから取得（初回アクセスのみ）
-    console.log('📡 初回ロード: JSONBinから取得中...');
+    // キャッシュなし or 空 → JSONBinから取得
+    console.log('📡 JSONBinから取得中...');
     const res = await fetch(`${JSONBIN_BASE}/latest`, {
         headers: { 'X-Master-Key': JSONBIN_API_KEY }
     });
@@ -133,7 +119,6 @@ async function jbLoad() {
     return _cache;
 }
 
-/** BIN全体を保存（即localStorage → 裏でJSONBin） */
 async function jbSave(data) {
     _cache = data;
     _lsWrite(data);
@@ -161,13 +146,11 @@ async function jbSave(data) {
     }
 }
 
-/** キャッシュ取得（なければロード） */
 async function jbGetCache() {
     if (!_cache) await jbLoad();
     return _cache;
 }
 
-/** UUID生成 */
 function jbUUID() {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
         const r = Math.random() * 16 | 0;
