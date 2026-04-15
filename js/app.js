@@ -1,4 +1,4 @@
-// YouTube動画管理システム
+h// YouTube動画管理システム
 class YouTubeManager {
     constructor() {
         this.videos = [];
@@ -8,7 +8,7 @@ class YouTubeManager {
         this.currentEditorFilter = '';
         this._sortable = null;
         this.scriptReferenceUrl = 'https://docs.google.com/spreadsheets/d/1YOrhhLhqAqneUC6VXYs5tRZPV3C1r6jHLNa8JzxaNzQ/edit?usp=sharing';
-        this.scriptTemplate = this.getScriptTemplate();
+        this.scriptTemplahhte = this.getScriptTemplate();
         this.init();
     }
 
@@ -16,7 +16,7 @@ class YouTubeManager {
         await this.loadEditors();
         await this.loadVideos();
         this.renderEditorChecklist();
-        this.renderEditorFilterOptions();
+        this.renderEditorFilterOptions();h
         this.updateDashboard();
         this.updateMonthlyBudget();
         this.renderVideos();
@@ -491,9 +491,9 @@ class YouTubeManager {
 
         tr.innerHTML = `
             <td data-label="サムネイル">
-                <img src="${video.thumbnail_url || 'https://via.placeholder.com/120x68?text=No+Image'}"
+                <img src="${video.thumbnail_url || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22120%22 height=%2268%22%3E%3Crect width=%22120%22 height=%2268%22 fill=%22%23f0f0f0%22/%3E%3Ctext x=%2260%22 y=%2238%22 text-anchor=%22middle%22 font-size=%2211%22 fill=%22%23999%22%3ENo Image%3C/text%3E%3C/svg%3E'}"
                      alt="サムネイル" class="video-thumbnail"
-                     onerror="this.src='https://via.placeholder.com/120x68?text=No+Image'"
+                     onerror="this.onerror=null;this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22120%22 height=%2268%22%3E%3Crect width=%22120%22 height=%2268%22 fill=%22%23f0f0f0%22/%3E%3Ctext x=%2260%22 y=%2238%22 text-anchor=%22middle%22 font-size=%2211%22 fill=%22%23999%22%3ENo Image%3C/text%3E%3C/svg%3E'"
                      onclick="youtubeManager.openVideo('${video.video_url || ''}')">
             </td>
             <td data-label="タイトル">
@@ -585,9 +585,9 @@ class YouTubeManager {
         tr.innerHTML = `
             <td data-label="サムネイル" style="position:relative;">
                 <span class="drag-handle-icon" title="ドラッグして並び替え">⠿</span>
-                <img src="${video.thumbnail_url || 'https://via.placeholder.com/120x68?text=No+Image'}" 
+                <img src="${video.thumbnail_url || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22120%22 height=%2268%22%3E%3Crect width=%22120%22 height=%2268%22 fill=%22%23f0f0f0%22/%3E%3Ctext x=%2260%22 y=%2238%22 text-anchor=%22middle%22 font-size=%2211%22 fill=%22%23999%22%3ENo Image%3C/text%3E%3C/svg%3E'}" 
                      alt="サムネイル" class="video-thumbnail" 
-                     onerror="this.src='https://via.placeholder.com/120x68?text=No+Image'"
+                     onerror="this.onerror=null;this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22120%22 height=%2268%22%3E%3Crect width=%22120%22 height=%2268%22 fill=%22%23f0f0f0%22/%3E%3Ctext x=%2260%22 y=%2238%22 text-anchor=%22middle%22 font-size=%2211%22 fill=%22%23999%22%3ENo Image%3C/text%3E%3C/svg%3E'"
                      onclick="youtubeManager.openVideo('${video.video_url}')">
             </td>
             <td data-label="タイトル">
