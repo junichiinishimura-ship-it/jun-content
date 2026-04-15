@@ -1,4 +1,4 @@
-h// YouTube動画管理システム
+// YouTube動画管理システム
 class YouTubeManager {
     constructor() {
         this.videos = [];
@@ -8,7 +8,7 @@ class YouTubeManager {
         this.currentEditorFilter = '';
         this._sortable = null;
         this.scriptReferenceUrl = 'https://docs.google.com/spreadsheets/d/1YOrhhLhqAqneUC6VXYs5tRZPV3C1r6jHLNa8JzxaNzQ/edit?usp=sharing';
-        this.scriptTemplahhte = this.getScriptTemplate();
+        this.scriptTemplate = this.getScriptTemplate();
         this.init();
     }
 
@@ -16,7 +16,7 @@ class YouTubeManager {
         await this.loadEditors();
         await this.loadVideos();
         this.renderEditorChecklist();
-        this.renderEditorFilterOptions();h
+        this.renderEditorFilterOptions();
         this.updateDashboard();
         this.updateMonthlyBudget();
         this.renderVideos();
