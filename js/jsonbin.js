@@ -1,7 +1,10 @@
 /**
  * JSONBin.io を使った共有データストレージ
  * 
- * v2: localStorage キャッシュ + 楽観的UI更新
+ * v2.1: localStorage キャッシュ（stale-while-revalidate）
+ *   - キャッシュがあれば即返す（JSONBinを待たない）
+ *   - 裏でJSONBinから最新を取得し、localStorageだけ更新（UIは触らない）
+ *   - 次回ページロード時に最新データが反映される
  * 
  * データ構造（1つのBINにまとめて保存）:
  * {
@@ -20,24 +23,23 @@ const JSONBIN_API_KEY = '$2a$10$AvmWUg6WVIQyDh8CBFaWFOx40lKAW6cLjXrK97I2AmsG80a.
 const JSONBIN_BASE    = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`;
 
 // ---- localStorage キャッシュ設定 ----
-const LS_DATA_KEY  = 'jb_cache_data';
-const LS_TS_KEY    = 'jb_cache_ts';
-const REQUIRED_KEYS = ['videos','editors','links','ec_courses','ec_course_videos','bonus_groups','bonus_items'];
+const LS_DATA_KEY    = 'jb_cache_data';
+const LS_TS_KEY      = 'jb_cache_ts';
+const REQUIRED_KEYS  = ['videos','editors','links','ec_courses','ec_course_videos','bonus_groups','bonus_items'];
 
-// メモリキャッシュ（ページ内での高速アクセス用）
+// メモリキャッシュ
 let _cache = null;
 let _saving = false;
 let _pendingSave = false;
+let _bgRefreshDone = false;
 
 // ---- localStorage ヘルパー ----
 
-/** localStorageからキャッシュを読み込む */
 function _lsRead() {
     try {
         const raw = localStorage.getItem(LS_DATA_KEY);
         if (!raw) return null;
         const data = JSON.parse(raw);
-        // 必要なキーを保証
         REQUIRED_KEYS.forEach(k => { if (!Array.isArray(data[k])) data[k] = []; });
         return data;
     } catch (e) {
@@ -46,7 +48,6 @@ function _lsRead() {
     }
 }
 
-/** localStorageにキャッシュを書き込む */
 function _lsWrite(data) {
     try {
         localStorage.setItem(LS_DATA_KEY, JSON.stringify(data));
@@ -56,64 +57,65 @@ function _lsWrite(data) {
     }
 }
 
-/** localStorageキャッシュのタイムスタンプ */
-function _lsTimestamp() {
-    return Number(localStorage.getItem(LS_TS_KEY)) || 0;
+// ---- バックグラウンド同期（UIには一切触らない） ----
+
+function _bgRefresh() {
+    if (_bgRefreshDone) return;
+    _bgRefreshDone = true;
+
+    fetch(`${JSONBIN_BASE}/latest`, {
+        headers: { 'X-Master-Key': JSONBIN_API_KEY }
+    })
+    .then(res => {
+        if (!res.ok) throw new Error(`JSONBin読み込み失敗: ${res.status}`);
+        return res.json();
+    })
+    .then(json => {
+        const fresh = json.record || {};
+        REQUIRED_KEYS.forEach(k => { if (!Array.isArray(fresh[k])) fresh[k] = []; });
+        // メモリキャッシュ + localStorage を静かに更新
+        _cache = fresh;
+        _lsWrite(fresh);
+        console.log('🔄 バックグラウンド同期完了');
+    })
+    .catch(e => {
+        console.warn('⚠️ バックグラウンド同期失敗:', e);
+    });
 }
 
 // ---- コアAPI ----
 
-/** 
- * BIN全体を読み込む
- * 1) まず localStorage から即座に返す（あれば）
- * 2) 裏で JSONBin から最新を取得し、差分があれば更新
- */
+/** BIN全体を読み込む */
 async function jbLoad() {
-    // Step 1: localStorageキャッシュがあれば即座にメモリキャッシュへ
+    // 1) localStorageキャッシュがあれば即採用（JSONBinを待たない）
     const lsData = _lsRead();
-    if (lsData && !_cache) {
+    if (lsData) {
         _cache = lsData;
-        console.log('⚡ localStorageキャッシュから即時ロード');
+        console.log('⚡ キャッシュから即時ロード');
+        // バックグラウンドで最新を取りに行く（awaitしない → UIに影響なし）
+        _bgRefresh();
+        return _cache;
     }
 
-    // Step 2: JSONBinから最新データを取得（バックグラウンド）
-    try {
-        const res = await fetch(`${JSONBIN_BASE}/latest`, {
-            headers: { 'X-Master-Key': JSONBIN_API_KEY }
-        });
-        if (!res.ok) throw new Error(`JSONBin読み込み失敗: ${res.status}`);
-        const json = await res.json();
-        const fresh = json.record || {};
-        REQUIRED_KEYS.forEach(k => { if (!Array.isArray(fresh[k])) fresh[k] = []; });
-
-        // メモリキャッシュ & localStorageを更新
-        _cache = fresh;
-        _lsWrite(fresh);
-        console.log('🔄 JSONBinから最新データ取得完了');
-    } catch (e) {
-        console.error('JSONBin読み込みエラー:', e);
-        // オフラインorエラー時はlocalStorageキャッシュで継続
-        if (!_cache && lsData) {
-            _cache = lsData;
-            console.warn('⚠️ JSONBin接続失敗 → localStorageキャッシュで動作');
-        } else if (!_cache) {
-            // キャッシュも無い場合は空データで初期化
-            _cache = {};
-            REQUIRED_KEYS.forEach(k => { _cache[k] = []; });
-        }
-    }
-
+    // 2) キャッシュなし → JSONBinから取得（初回アクセスのみ）
+    console.log('📡 初回ロード: JSONBinから取得中...');
+    const res = await fetch(`${JSONBIN_BASE}/latest`, {
+        headers: { 'X-Master-Key': JSONBIN_API_KEY }
+    });
+    if (!res.ok) throw new Error(`JSONBin読み込み失敗: ${res.status}`);
+    const json = await res.json();
+    _cache = json.record || {};
+    REQUIRED_KEYS.forEach(k => { if (!Array.isArray(_cache[k])) _cache[k] = []; });
+    _lsWrite(_cache);
+    _bgRefreshDone = true;
     return _cache;
 }
 
-/** BIN全体を保存（楽観的更新：即localStorage → 裏でJSONBin） */
+/** BIN全体を保存（即localStorage → 裏でJSONBin） */
 async function jbSave(data) {
     _cache = data;
-
-    // 即座にlocalStorageへ書き込み（楽観的更新）
     _lsWrite(data);
 
-    // JSONBinへの保存（連続呼び出しをまとめる）
     if (_saving) { _pendingSave = true; return; }
     _saving = true;
     try {
@@ -139,15 +141,7 @@ async function jbSave(data) {
 
 /** キャッシュ取得（なければロード） */
 async function jbGetCache() {
-    if (!_cache) {
-        // まずlocalStorageから即座にロード
-        const lsData = _lsRead();
-        if (lsData) {
-            _cache = lsData;
-        }
-        // JSONBinからも取得（最新同期）
-        await jbLoad();
-    }
+    if (!_cache) await jbLoad();
     return _cache;
 }
 
@@ -160,22 +154,19 @@ function jbUUID() {
 }
 
 // =============================================
-// テーブル操作 API（Tables API互換インターフェース）
+// テーブル操作 API
 // =============================================
 
-/** レコード一覧取得 */
 async function jbGetAll(table) {
     const cache = await jbGetCache();
     return [...(cache[table] || [])];
 }
 
-/** レコード1件取得 */
 async function jbGetOne(table, id) {
     const cache = await jbGetCache();
     return (cache[table] || []).find(r => r.id === id) || null;
 }
 
-/** レコード作成 */
 async function jbCreate(table, data) {
     const cache = await jbGetCache();
     const record = {
@@ -190,16 +181,11 @@ async function jbCreate(table, data) {
     return record;
 }
 
-/** レコード更新（全置換） */
 async function jbUpdate(table, id, data) {
     const cache = await jbGetCache();
     if (!Array.isArray(cache[table])) cache[table] = [];
     const idx = cache[table].findIndex(r => r.id === id);
-    const record = {
-        ...data,
-        id,
-        updated_at: Date.now()
-    };
+    const record = { ...data, id, updated_at: Date.now() };
     if (idx >= 0) {
         cache[table][idx] = record;
     } else {
@@ -209,7 +195,6 @@ async function jbUpdate(table, id, data) {
     return record;
 }
 
-/** レコード部分更新 */
 async function jbPatch(table, id, data) {
     const cache = await jbGetCache();
     if (!Array.isArray(cache[table])) cache[table] = [];
@@ -220,7 +205,6 @@ async function jbPatch(table, id, data) {
     return cache[table][idx];
 }
 
-/** レコード削除 */
 async function jbDelete(table, id) {
     const cache = await jbGetCache();
     if (!Array.isArray(cache[table])) return;
