@@ -1,10 +1,11 @@
 /**
  * JSONBin.io を使った共有データストレージ
  * 
- * v2.1: localStorage キャッシュ（stale-while-revalidate）
- *   - キャッシュがあれば即返す（JSONBinを待たない）
- *   - 裏でJSONBinから最新を取得し、localStorageだけ更新（UIは触らない）
- *   - 次回ページロード時に最新データが反映される
+ * v3: localStorage キャッシュ + バックグラウンド同期 + 自動リロード
+ *   - キャッシュがあれば即返す（高速表示）
+ *   - 裏でJSONBinから最新を取得
+ *   - データに変更があればキャッシュ更新 → ページ自動リロード（キャッシュから即表示なので一瞬）
+ *   - データに変更がなければ何もしない
  * 
  * データ構造（1つのBINにまとめて保存）:
  * {
@@ -57,11 +58,20 @@ function _lsWrite(data) {
     }
 }
 
-// ---- バックグラウンド同期（UIには一切触らない） ----
+// ---- バックグラウンド同期 ----
+// データが変わっていたらキャッシュ更新 → ページリロード（キャッシュから即表示）
+// データが同じなら何もしない
 
 function _bgRefresh() {
     if (_bgRefreshDone) return;
     _bgRefreshDone = true;
+
+    // 直前にバックグラウンド同期でリロードした場合はスキップ（ループ防止）
+    if (sessionStorage.getItem('jb_bg_reloaded')) {
+        sessionStorage.removeItem('jb_bg_reloaded');
+        console.log('🔄 バックグラウンド同期後のリロード完了');
+        return;
+    }
 
     fetch(`${JSONBIN_BASE}/latest`, {
         headers: { 'X-Master-Key': JSONBIN_API_KEY }
@@ -73,10 +83,22 @@ function _bgRefresh() {
     .then(json => {
         const fresh = json.record || {};
         REQUIRED_KEYS.forEach(k => { if (!Array.isArray(fresh[k])) fresh[k] = []; });
-        // メモリキャッシュ + localStorage を静かに更新
+
+        // 現在のキャッシュと比較
+        const oldStr = JSON.stringify(_cache);
+        const newStr = JSON.stringify(fresh);
+
+        if (oldStr === newStr) {
+            console.log('✅ データ変更なし');
+            return;
+        }
+
+        // データが変わっている → キャッシュ更新してリロード
+        console.log('🔄 新しいデータを検出 → リロードします');
         _cache = fresh;
         _lsWrite(fresh);
-        console.log('🔄 バックグラウンド同期完了');
+        sessionStorage.setItem('jb_bg_reloaded', '1');
+        location.reload();
     })
     .catch(e => {
         console.warn('⚠️ バックグラウンド同期失敗:', e);
@@ -87,12 +109,12 @@ function _bgRefresh() {
 
 /** BIN全体を読み込む */
 async function jbLoad() {
-    // 1) localStorageキャッシュがあれば即採用（JSONBinを待たない）
+    // 1) localStorageキャッシュがあれば即採用
     const lsData = _lsRead();
     if (lsData) {
         _cache = lsData;
         console.log('⚡ キャッシュから即時ロード');
-        // バックグラウンドで最新を取りに行く（awaitしない → UIに影響なし）
+        // バックグラウンドで最新チェック（awaitしない）
         _bgRefresh();
         return _cache;
     }
