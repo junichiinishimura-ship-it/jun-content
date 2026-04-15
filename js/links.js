@@ -92,6 +92,9 @@ class LinkManager {
                         <button class="btn-icon favorite" onclick="linkManager.toggleFavorite('${link.id}')" title="お気に入り">
                             <i class="bi ${link.is_favorite ? 'bi-star-fill' : 'bi-star'}"></i>
                         </button>
+                        <button class="btn-icon" onclick="linkManager.moveToYouTube('${link.id}')" title="YouTube管理へ移動" style="color:#dc3545;">
+                            <i class="bi bi-youtube"></i>
+                        </button>
                         <button class="btn-icon edit" onclick="linkManager.editLink('${link.id}')" title="編集">
                             <i class="bi bi-pencil"></i>
                         </button>
@@ -190,6 +193,49 @@ class LinkManager {
             this.renderLinks();
         } catch (e) {
             this.showNotification('更新に失敗しました: ' + e.message, 'danger');
+        }
+    }
+
+    // リンクをYouTube管理へ移動
+    async moveToYouTube(id) {
+        const link = this.links.find(l => l.id === id);
+        if (!link) return;
+
+        if (!confirm(`「${link.title}」をYouTube管理へ移動しますか？\n\n※ リンクストックからは削除されます。`)) return;
+
+        try {
+            // YouTube管理にデータを作成
+            const videoData = {
+                title: link.title || '',
+                description: link.description || '',
+                status: 'planning',
+                progress: 20,
+                thumbnail_url: '',
+                video_url: '',
+                reference_urls: link.url ? [link.url] : [],
+                scheduled_date: '',
+                editor_assignments: [],
+                editors: [],
+                budget: 0,
+                sort_order: 0,
+                script_sections: [],
+                views: 0,
+                likes: 0,
+                comments: 0,
+                notes: '',
+            };
+            await jbCreate('videos', videoData);
+
+            // リンクストックから削除
+            await jbDelete('links', id);
+
+            // UI更新
+            await this.loadLinks();
+            this.updateStats();
+            this.renderLinks();
+            this.showNotification('YouTube管理へ移動しました ✅', 'success');
+        } catch (e) {
+            this.showNotification('移動に失敗しました: ' + e.message, 'danger');
         }
     }
 
