@@ -528,6 +528,9 @@ class YouTubeManager {
                     <button class="btn btn-sm btn-outline-warning action-btn" onclick="youtubeManager.quickChangeStatus('${video.id}','review')" data-tooltip="レビュー中に戻す">
                         <i class="bi bi-arrow-counterclockwise"></i>
                     </button>
+                    <button class="btn btn-sm btn-outline-info action-btn" onclick="youtubeManager.moveToLinkStock('${video.id}')" data-tooltip="リンクストックへ移動">
+                        <i class="bi bi-box-arrow-right"></i>
+                    </button>
                     <button class="btn btn-sm btn-outline-danger action-btn" onclick="youtubeManager.confirmDeleteVideo('${video.id}', '${video.title.replace(/'/g, "\\'").replace(/"/g, '&quot;')}')" data-tooltip="この動画を削除">
                         <i class="bi bi-trash"></i>
                     </button>
@@ -633,6 +636,9 @@ class YouTubeManager {
                     </button>
                     <button class="btn btn-sm btn-outline-secondary action-btn" onclick="youtubeManager.openScriptModal('${video.id}')" data-tooltip="台本を編集">
                         <i class="bi bi-journal-text"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-info action-btn" onclick="youtubeManager.moveToLinkStock('${video.id}')" data-tooltip="リンクストックへ移動">
+                        <i class="bi bi-box-arrow-right"></i>
                     </button>
                     <button class="btn btn-sm btn-outline-danger action-btn" onclick="youtubeManager.confirmDeleteVideo('${video.id}', '${video.title.replace(/'/g, "\\'").replace(/"/g, '&quot;')}')" data-tooltip="この動画を削除">
                         <i class="bi bi-trash"></i>
@@ -991,6 +997,39 @@ class YouTubeManager {
         } catch (error) {
             console.error('ステータス更新エラー:', error);
             this.showNotification('ステータスの更新に失敗しました', 'danger');
+        }
+    }
+
+    // 動画をリンクストックへ移動
+    async moveToLinkStock(id) {
+        const video = this.videos.find(v => v.id === id);
+        if (!video) return;
+
+        if (!confirm(`「${video.title}」をリンクストックへ移動しますか？\n\n※ YouTube管理からは削除されます。`)) return;
+
+        try {
+            // リンクストックにデータを作成
+            const linkData = {
+                title: video.title || '',
+                url: video.video_url || (Array.isArray(video.reference_urls) && video.reference_urls[0]) || '',
+                description: video.description || '',
+                is_favorite: false,
+            };
+            await jbCreate('links', linkData);
+
+            // YouTube管理から削除
+            await jbDelete('videos', id);
+
+            // UI更新
+            await this.loadVideos();
+            this.updateDashboard();
+            this.updateMonthlyBudget();
+            this.renderVideos();
+            this.renderPublishedVideos();
+            this.showNotification('リンクストックへ移動しました ✅', 'success');
+        } catch (error) {
+            console.error('移動エラー:', error);
+            this.showNotification('移動に失敗しました: ' + error.message, 'danger');
         }
     }
 
