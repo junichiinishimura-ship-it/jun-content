@@ -229,9 +229,13 @@ async function jbLoad() {
 async function jbSave(data) {
     _cache = data;
 
-    // ★ 保存時も空データチェック
+    // ★ 空データチェック: localStorageもJSONBinも守る
     if (_hasData(data)) {
         _lsWrite(data);
+    } else {
+        console.warn('⛔ 空データのため保存をブロック（localStorage・JSONBin両方）');
+        _statusDone();
+        return;
     }
 
     if (_saving) { _pendingSave = true; return; }
