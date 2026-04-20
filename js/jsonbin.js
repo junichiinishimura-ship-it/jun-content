@@ -1,11 +1,11 @@
 /**
  * JSONBin.io を使った共有データストレージ
  * 
- * v4: ステータス表示 + localStorage キャッシュ + バックグラウンド同期
- *   - 画面上部にデータ同期状態を常時表示
- *   - キャッシュがあり中身もあれば即返す（高速表示）
- *   - キャッシュが空（データ0件）なら無視してJSONBinから取得
- *   - 裏でJSONBinから最新を取得し、変更があればページ自動リロード
+ * v5: 堅牢版
+ *   - 空データは絶対にキャッシュに保存しない
+ *   - キャッシュがあれば即表示 → 裏で最新チェック
+ *   - 変更があり、かつデータが有効なら自動リロード
+ *   - 右下にステータスバー表示
  */
 
 const JSONBIN_BIN_ID  = '69a6c94bae596e708f5acd85';
@@ -22,7 +22,22 @@ let _pendingSave = false;
 let _bgRefreshDone = false;
 
 // ============================================================
-// ステータスバー（全ページ共通・自動挿入）
+// データ検証: 中身が1件以上あるか
+// ============================================================
+
+function _hasData(data) {
+    if (!data || typeof data !== 'object') return false;
+    return REQUIRED_KEYS.some(k => Array.isArray(data[k]) && data[k].length > 0);
+}
+
+function _ensureKeys(data) {
+    if (!data || typeof data !== 'object') data = {};
+    REQUIRED_KEYS.forEach(k => { if (!Array.isArray(data[k])) data[k] = []; });
+    return data;
+}
+
+// ============================================================
+// ステータスバー
 // ============================================================
 
 let _statusEl = null;
@@ -30,6 +45,7 @@ let _statusTimer = null;
 
 function _initStatusBar() {
     if (_statusEl) return;
+    if (!document.body) return;
     const bar = document.createElement('div');
     bar.id = 'jb-sync-status';
     bar.style.cssText = `
@@ -60,7 +76,6 @@ function _showStatus(icon, text, color, bgColor, autoHide) {
     _statusEl.style.background = bgColor;
     _statusEl.style.opacity = '1';
     _statusEl.style.transform = 'translateY(0)';
-
     if (_statusTimer) clearTimeout(_statusTimer);
     if (autoHide) {
         _statusTimer = setTimeout(() => {
@@ -70,16 +85,16 @@ function _showStatus(icon, text, color, bgColor, autoHide) {
     }
 }
 
-function _statusSyncing()  { _showStatus('🔄', '同期中...', '#065fd4', '#e8f0fe', 0); }
-function _statusSaving()   { _showStatus('💾', '保存中...', '#b45309', '#fef3c7', 0); }
-function _statusDone()     { _showStatus('✅', '同期完了',  '#16a34a', '#dcfce7', 3000); }
-function _statusSaved()    { _showStatus('✅', '保存完了',  '#16a34a', '#dcfce7', 2500); }
-function _statusOffline()  { _showStatus('⚠️', 'オフライン（キャッシュで動作中）', '#dc2626', '#fee2e2', 0); }
+function _statusSyncing()  { _showStatus('🔄', '同期中...',  '#065fd4', '#e8f0fe', 0); }
+function _statusSaving()   { _showStatus('💾', '保存中...',  '#b45309', '#fef3c7', 0); }
+function _statusDone()     { _showStatus('✅', '同期完了',   '#16a34a', '#dcfce7', 3000); }
+function _statusSaved()    { _showStatus('✅', '保存完了',   '#16a34a', '#dcfce7', 2500); }
+function _statusOffline()  { _showStatus('⚠️', 'オフライン', '#dc2626', '#fee2e2', 5000); }
 function _statusLoading()  { _showStatus('📡', 'データ取得中...', '#065fd4', '#e8f0fe', 0); }
 function _statusCached()   { _showStatus('⚡', 'キャッシュから読み込み', '#6b7280', '#f3f4f6', 2000); }
 
 // ============================================================
-// localStorage ヘルパー
+// localStorage ヘルパー（空データは絶対に保存しない）
 // ============================================================
 
 function _lsRead() {
@@ -87,29 +102,48 @@ function _lsRead() {
         const raw = localStorage.getItem(LS_DATA_KEY);
         if (!raw) return null;
         const data = JSON.parse(raw);
-        REQUIRED_KEYS.forEach(k => { if (!Array.isArray(data[k])) data[k] = []; });
-
-        // 中身が全て空なら「キャッシュなし」扱い
-        const totalItems = REQUIRED_KEYS.reduce((sum, k) => sum + data[k].length, 0);
-        if (totalItems === 0) {
-            console.log('⚠️ キャッシュは空データ → スキップ');
+        _ensureKeys(data);
+        if (!_hasData(data)) {
+            console.log('⚠️ キャッシュは空データ → 無視');
+            localStorage.removeItem(LS_DATA_KEY);
+            localStorage.removeItem(LS_TS_KEY);
             return null;
         }
-
         return data;
     } catch (e) {
         console.warn('localStorageキャッシュ読み込み失敗:', e);
+        localStorage.removeItem(LS_DATA_KEY);
+        localStorage.removeItem(LS_TS_KEY);
         return null;
     }
 }
 
 function _lsWrite(data) {
+    // ★ 空データは絶対に保存しない
+    if (!_hasData(data)) {
+        console.warn('⛔ 空データの保存をブロックしました');
+        return;
+    }
     try {
         localStorage.setItem(LS_DATA_KEY, JSON.stringify(data));
         localStorage.setItem(LS_TS_KEY, String(Date.now()));
     } catch (e) {
         console.warn('localStorageキャッシュ書き込み失敗:', e);
     }
+}
+
+// ============================================================
+// JSONBinからデータ取得（共通ヘルパー）
+// ============================================================
+
+async function _fetchFromJsonBin() {
+    const res = await fetch(`${JSONBIN_BASE}/latest`, {
+        headers: { 'X-Master-Key': JSONBIN_API_KEY }
+    });
+    if (!res.ok) throw new Error(`JSONBin読み込み失敗: ${res.status}`);
+    const json = await res.json();
+    const data = _ensureKeys(json.record || {});
+    return data;
 }
 
 // ============================================================
@@ -120,6 +154,7 @@ function _bgRefresh() {
     if (_bgRefreshDone) return;
     _bgRefreshDone = true;
 
+    // リロード直後はスキップ（ループ防止）
     if (sessionStorage.getItem('jb_bg_reloaded')) {
         sessionStorage.removeItem('jb_bg_reloaded');
         _statusDone();
@@ -128,35 +163,34 @@ function _bgRefresh() {
 
     _statusSyncing();
 
-    fetch(`${JSONBIN_BASE}/latest`, {
-        headers: { 'X-Master-Key': JSONBIN_API_KEY }
-    })
-    .then(res => {
-        if (!res.ok) throw new Error(`JSONBin読み込み失敗: ${res.status}`);
-        return res.json();
-    })
-    .then(json => {
-        const fresh = json.record || {};
-        REQUIRED_KEYS.forEach(k => { if (!Array.isArray(fresh[k])) fresh[k] = []; });
+    _fetchFromJsonBin()
+        .then(fresh => {
+            // ★ JSONBinから空データが返ってきたら無視
+            if (!_hasData(fresh)) {
+                console.warn('⛔ JSONBinから空データ受信 → 無視（キャッシュを維持）');
+                _statusDone();
+                return;
+            }
 
-        const oldStr = JSON.stringify(_cache);
-        const newStr = JSON.stringify(fresh);
+            const oldStr = JSON.stringify(_cache);
+            const newStr = JSON.stringify(fresh);
 
-        if (oldStr === newStr) {
-            _statusDone();
-            return;
-        }
+            if (oldStr === newStr) {
+                _statusDone();
+                return;
+            }
 
-        // データ変更あり → キャッシュ更新してリロード
-        _cache = fresh;
-        _lsWrite(fresh);
-        sessionStorage.setItem('jb_bg_reloaded', '1');
-        location.reload();
-    })
-    .catch(e => {
-        console.warn('⚠️ バックグラウンド同期失敗:', e);
-        _statusOffline();
-    });
+            // データ変更あり & 有効 → キャッシュ更新してリロード
+            console.log('🔄 新しいデータを検出 → リロード');
+            _cache = fresh;
+            _lsWrite(fresh);
+            sessionStorage.setItem('jb_bg_reloaded', '1');
+            location.reload();
+        })
+        .catch(e => {
+            console.warn('⚠️ バックグラウンド同期失敗:', e);
+            _statusOffline();
+        });
 }
 
 // ============================================================
@@ -164,42 +198,41 @@ function _bgRefresh() {
 // ============================================================
 
 async function jbLoad() {
+    // 1) キャッシュに有効なデータがあれば即採用
     const lsData = _lsRead();
     if (lsData) {
         _cache = lsData;
         _statusCached();
-        // バックグラウンドで最新チェック
         _bgRefresh();
         return _cache;
     }
 
-    // キャッシュなし or 空 → JSONBinから取得
+    // 2) キャッシュなし → JSONBinから取得
     _statusLoading();
     try {
-        const res = await fetch(`${JSONBIN_BASE}/latest`, {
-            headers: { 'X-Master-Key': JSONBIN_API_KEY }
-        });
-        if (!res.ok) throw new Error(`JSONBin読み込み失敗: ${res.status}`);
-        const json = await res.json();
-        _cache = json.record || {};
-        REQUIRED_KEYS.forEach(k => { if (!Array.isArray(_cache[k])) _cache[k] = []; });
-        _lsWrite(_cache);
+        const data = await _fetchFromJsonBin();
+        _cache = data;
+        if (_hasData(data)) {
+            _lsWrite(data);
+        }
         _bgRefreshDone = true;
         _statusDone();
         return _cache;
     } catch (e) {
         console.error('JSONBin読み込みエラー:', e);
         _statusOffline();
-        // 空データで初期化
-        _cache = {};
-        REQUIRED_KEYS.forEach(k => { _cache[k] = []; });
+        _cache = _ensureKeys({});
         return _cache;
     }
 }
 
 async function jbSave(data) {
     _cache = data;
-    _lsWrite(data);
+
+    // ★ 保存時も空データチェック
+    if (_hasData(data)) {
+        _lsWrite(data);
+    }
 
     if (_saving) { _pendingSave = true; return; }
     _saving = true;
@@ -216,7 +249,7 @@ async function jbSave(data) {
         if (!res.ok) throw new Error(`JSONBin保存失敗: ${res.status}`);
         _statusSaved();
     } catch (e) {
-        console.error('JSONBin保存エラー（localStorageには保存済み）:', e);
+        console.error('JSONBin保存エラー:', e);
         _statusOffline();
     } finally {
         _saving = false;
