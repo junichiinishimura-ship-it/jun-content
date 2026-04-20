@@ -1,11 +1,10 @@
 /**
  * JSONBin.io を使った共有データストレージ
  * 
- * v5: 堅牢版
- *   - 空データは絶対にキャッシュに保存しない
- *   - キャッシュがあれば即表示 → 裏で最新チェック
- *   - 変更があり、かつデータが有効なら自動リロード
- *   - 右下にステータスバー表示
+ * v6: 自動バックアップ（3世代） + 空データ完全ブロック + ステータスバー
+ *   - 保存のたびにlocalStorageに自動バックアップ（3世代ローテーション）
+ *   - データが空の時、バックアップがあれば復元UIを自動表示
+ *   - 空データはlocalStorage・JSONBin両方への保存をブロック
  */
 
 const JSONBIN_BIN_ID  = '69a6c94bae596e708f5acd85';
@@ -15,6 +14,8 @@ const JSONBIN_BASE    = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`;
 const LS_DATA_KEY    = 'jb_cache_data';
 const LS_TS_KEY      = 'jb_cache_ts';
 const REQUIRED_KEYS  = ['videos','editors','links','ec_courses','ec_course_videos','bonus_groups','bonus_items'];
+const BACKUP_MAX     = 3;
+const LS_BACKUP_PREFIX = 'jb_backup_';
 
 let _cache = null;
 let _saving = false;
@@ -22,7 +23,7 @@ let _pendingSave = false;
 let _bgRefreshDone = false;
 
 // ============================================================
-// データ検証: 中身が1件以上あるか
+// データ検証
 // ============================================================
 
 function _hasData(data) {
@@ -34,6 +35,194 @@ function _ensureKeys(data) {
     if (!data || typeof data !== 'object') data = {};
     REQUIRED_KEYS.forEach(k => { if (!Array.isArray(data[k])) data[k] = []; });
     return data;
+}
+
+function _countItems(data) {
+    if (!data) return 0;
+    return REQUIRED_KEYS.reduce((sum, k) => sum + (Array.isArray(data[k]) ? data[k].length : 0), 0);
+}
+
+// ============================================================
+// 自動バックアップ（3世代ローテーション）
+// ============================================================
+
+function _getBackups() {
+    const backups = [];
+    for (let i = 1; i <= BACKUP_MAX; i++) {
+        try {
+            const raw = localStorage.getItem(LS_BACKUP_PREFIX + i);
+            if (!raw) continue;
+            const parsed = JSON.parse(raw);
+            if (parsed && parsed.ts && parsed.data && _hasData(parsed.data)) {
+                backups.push({ slot: i, ts: parsed.ts, data: parsed.data });
+            }
+        } catch (e) { /* skip */ }
+    }
+    // 新しい順にソート
+    backups.sort((a, b) => b.ts - a.ts);
+    return backups;
+}
+
+function _saveBackup(data) {
+    if (!_hasData(data)) return;
+
+    // 現在のバックアップを取得
+    const backups = _getBackups();
+
+    // 直前のバックアップと同じなら保存しない（無駄な世代消費を防ぐ）
+    if (backups.length > 0) {
+        const lastStr = JSON.stringify(backups[0].data);
+        const newStr = JSON.stringify(data);
+        if (lastStr === newStr) return;
+    }
+
+    // 世代をローテーション（3→破棄、2→3、1→2、新規→1）
+    try {
+        for (let i = BACKUP_MAX; i >= 2; i--) {
+            const prev = localStorage.getItem(LS_BACKUP_PREFIX + (i - 1));
+            if (prev) {
+                localStorage.setItem(LS_BACKUP_PREFIX + i, prev);
+            } else {
+                localStorage.removeItem(LS_BACKUP_PREFIX + i);
+            }
+        }
+        localStorage.setItem(LS_BACKUP_PREFIX + '1', JSON.stringify({
+            ts: Date.now(),
+            data: data
+        }));
+    } catch (e) {
+        console.warn('バックアップ保存失敗:', e);
+    }
+}
+
+// ============================================================
+// 復元UI（データ空 + バックアップありの時に自動表示）
+// ============================================================
+
+function _showRestoreUI(backups) {
+    if (document.getElementById('jb-restore-overlay')) return;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'jb-restore-overlay';
+    overlay.style.cssText = `
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 999999;
+        font-family: 'Noto Sans JP', sans-serif;
+    `;
+
+    const formatDate = (ts) => {
+        const d = new Date(ts);
+        return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    };
+
+    const btnList = backups.map((b, i) => {
+        const count = _countItems(b.data);
+        const label = i === 0 ? '最新' : i === 1 ? '1つ前' : '2つ前';
+        return `
+            <button onclick="window._jbRestore(${b.slot})" style="
+                width: 100%;
+                padding: 14px 16px;
+                margin-bottom: 8px;
+                background: ${i === 0 ? '#dc3545' : '#6c757d'};
+                color: white;
+                border: none;
+                border-radius: 10px;
+                font-size: 0.95rem;
+                font-weight: 600;
+                cursor: pointer;
+                text-align: left;
+                transition: opacity 0.2s;
+            " onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+                📦 ${label}のバックアップ（${formatDate(b.ts)}）
+                <br><small style="font-weight:400; opacity:0.9;">データ ${count}件</small>
+            </button>
+        `;
+    }).join('');
+
+    overlay.innerHTML = `
+        <div style="
+            background: #fff;
+            border-radius: 16px;
+            padding: 32px 28px;
+            width: 400px;
+            max-width: 90vw;
+            box-shadow: 0 8px 40px rgba(0,0,0,0.3);
+        ">
+            <div style="text-align: center; margin-bottom: 20px;">
+                <div style="font-size: 2.5rem; margin-bottom: 8px;">⚠️</div>
+                <h3 style="font-size: 1.2rem; font-weight: 700; color: #1a1a2e; margin: 0 0 6px;">データが見つかりません</h3>
+                <p style="color: #6c757d; font-size: 0.88rem; margin: 0;">バックアップから復元できます</p>
+            </div>
+            ${btnList}
+            <button onclick="document.getElementById('jb-restore-overlay').remove()" style="
+                width: 100%;
+                padding: 12px;
+                background: transparent;
+                color: #6c757d;
+                border: 1px solid #dee2e6;
+                border-radius: 10px;
+                font-size: 0.9rem;
+                cursor: pointer;
+                margin-top: 4px;
+            ">閉じる（空のまま続ける）</button>
+        </div>
+    `;
+
+    // グローバル復元関数
+    window._jbRestore = async function(slot) {
+        try {
+            const raw = localStorage.getItem(LS_BACKUP_PREFIX + slot);
+            if (!raw) { alert('バックアップが見つかりません'); return; }
+            const parsed = JSON.parse(raw);
+            if (!parsed || !parsed.data || !_hasData(parsed.data)) {
+                alert('バックアップデータが無効です');
+                return;
+            }
+
+            overlay.querySelector('div').innerHTML = `
+                <div style="text-align:center; padding: 40px 0;">
+                    <div style="font-size: 2rem; margin-bottom: 12px;">🔄</div>
+                    <p style="font-size: 1rem; font-weight: 600;">復元中...</p>
+                </div>
+            `;
+
+            const data = _ensureKeys(parsed.data);
+            _cache = data;
+            _lsWrite(data);
+
+            // JSONBinにも書き戻す
+            const res = await fetch(JSONBIN_BASE, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Master-Key': JSONBIN_API_KEY
+                },
+                body: JSON.stringify(data)
+            });
+            if (!res.ok) throw new Error('JSONBin保存失敗');
+
+            overlay.querySelector('div').innerHTML = `
+                <div style="text-align:center; padding: 40px 0;">
+                    <div style="font-size: 2rem; margin-bottom: 12px;">✅</div>
+                    <p style="font-size: 1rem; font-weight: 600;">${_countItems(data)}件のデータを復元しました</p>
+                    <p style="color: #6c757d; font-size: 0.85rem;">ページをリロードします...</p>
+                </div>
+            `;
+
+            setTimeout(() => location.reload(), 1500);
+        } catch (e) {
+            alert('復元に失敗しました: ' + e.message);
+        }
+    };
+
+    function mount() { document.body.appendChild(overlay); }
+    if (document.body) mount();
+    else document.addEventListener('DOMContentLoaded', mount);
 }
 
 // ============================================================
@@ -94,7 +283,7 @@ function _statusLoading()  { _showStatus('📡', 'データ取得中...', '#065f
 function _statusCached()   { _showStatus('⚡', 'キャッシュから読み込み', '#6b7280', '#f3f4f6', 2000); }
 
 // ============================================================
-// localStorage ヘルパー（空データは絶対に保存しない）
+// localStorage ヘルパー
 // ============================================================
 
 function _lsRead() {
@@ -104,14 +293,12 @@ function _lsRead() {
         const data = JSON.parse(raw);
         _ensureKeys(data);
         if (!_hasData(data)) {
-            console.log('⚠️ キャッシュは空データ → 無視');
             localStorage.removeItem(LS_DATA_KEY);
             localStorage.removeItem(LS_TS_KEY);
             return null;
         }
         return data;
     } catch (e) {
-        console.warn('localStorageキャッシュ読み込み失敗:', e);
         localStorage.removeItem(LS_DATA_KEY);
         localStorage.removeItem(LS_TS_KEY);
         return null;
@@ -119,9 +306,8 @@ function _lsRead() {
 }
 
 function _lsWrite(data) {
-    // ★ 空データは絶対に保存しない
     if (!_hasData(data)) {
-        console.warn('⛔ 空データの保存をブロックしました');
+        console.warn('⛔ 空データの保存をブロック');
         return;
     }
     try {
@@ -133,7 +319,7 @@ function _lsWrite(data) {
 }
 
 // ============================================================
-// JSONBinからデータ取得（共通ヘルパー）
+// JSONBin取得ヘルパー
 // ============================================================
 
 async function _fetchFromJsonBin() {
@@ -142,8 +328,7 @@ async function _fetchFromJsonBin() {
     });
     if (!res.ok) throw new Error(`JSONBin読み込み失敗: ${res.status}`);
     const json = await res.json();
-    const data = _ensureKeys(json.record || {});
-    return data;
+    return _ensureKeys(json.record || {});
 }
 
 // ============================================================
@@ -154,7 +339,6 @@ function _bgRefresh() {
     if (_bgRefreshDone) return;
     _bgRefreshDone = true;
 
-    // リロード直後はスキップ（ループ防止）
     if (sessionStorage.getItem('jb_bg_reloaded')) {
         sessionStorage.removeItem('jb_bg_reloaded');
         _statusDone();
@@ -165,9 +349,8 @@ function _bgRefresh() {
 
     _fetchFromJsonBin()
         .then(fresh => {
-            // ★ JSONBinから空データが返ってきたら無視
             if (!_hasData(fresh)) {
-                console.warn('⛔ JSONBinから空データ受信 → 無視（キャッシュを維持）');
+                console.warn('⛔ JSONBinから空データ受信 → 無視');
                 _statusDone();
                 return;
             }
@@ -180,10 +363,9 @@ function _bgRefresh() {
                 return;
             }
 
-            // データ変更あり & 有効 → キャッシュ更新してリロード
-            console.log('🔄 新しいデータを検出 → リロード');
             _cache = fresh;
             _lsWrite(fresh);
+            _saveBackup(fresh);
             sessionStorage.setItem('jb_bg_reloaded', '1');
             location.reload();
         })
@@ -212,15 +394,35 @@ async function jbLoad() {
     try {
         const data = await _fetchFromJsonBin();
         _cache = data;
+
         if (_hasData(data)) {
             _lsWrite(data);
+            _saveBackup(data);
+            _bgRefreshDone = true;
+            _statusDone();
+            return _cache;
+        }
+
+        // JSONBinも空 → バックアップがあれば復元UI表示
+        console.warn('⚠️ JSONBinもキャッシュも空');
+        const backups = _getBackups();
+        if (backups.length > 0) {
+            _showRestoreUI(backups);
         }
         _bgRefreshDone = true;
-        _statusDone();
+        _cache = _ensureKeys({});
         return _cache;
+
     } catch (e) {
         console.error('JSONBin読み込みエラー:', e);
         _statusOffline();
+
+        // オフライン時もバックアップがあれば復元UI
+        const backups = _getBackups();
+        if (backups.length > 0) {
+            _showRestoreUI(backups);
+        }
+
         _cache = _ensureKeys({});
         return _cache;
     }
@@ -229,14 +431,14 @@ async function jbLoad() {
 async function jbSave(data) {
     _cache = data;
 
-    // ★ 空データチェック: localStorageもJSONBinも守る
-    if (_hasData(data)) {
-        _lsWrite(data);
-    } else {
+    if (!_hasData(data)) {
         console.warn('⛔ 空データのため保存をブロック（localStorage・JSONBin両方）');
         _statusDone();
         return;
     }
+
+    _lsWrite(data);
+    _saveBackup(data);
 
     if (_saving) { _pendingSave = true; return; }
     _saving = true;
