@@ -1,13 +1,14 @@
 /**
  * JSONBin.io を使った共有データストレージ
- * 
- * v6: 自動バックアップ（3世代） + 空データ完全ブロック + ステータスバー
- *   - 保存のたびにlocalStorageに自動バックアップ（3世代ローテーション）
- *   - データが空の時、バックアップがあれば復元UIを自動表示
- *   - 空データはlocalStorage・JSONBin両方への保存をブロック
+ *
+ * v7: BIN分離 + キー混入防止セーフガード
+ *   - 専用BIN（jun-content）に切り替え
+ *   - PUT時に REQUIRED_KEYS 以外のキーを除去（他ツールのデータ混入を防止）
+ *   - 万一外部から余計なキーが入っても自分のキー以外は触らない
+ *   - 自動バックアップ（3世代）+ 復元UI + ステータスバーは v6 の挙動を継承
  */
 
-const JSONBIN_BIN_ID  = '69a6c94bae596e708f5acd85';
+const JSONBIN_BIN_ID  = '69f6abe036566621a81b51ff';
 const JSONBIN_API_KEY = '$2a$10$AvmWUg6WVIQyDh8CBFaWFOx40lKAW6cLjXrK97I2AmsG80a.4IOtO';
 const JSONBIN_BASE    = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`;
 
@@ -23,7 +24,7 @@ let _pendingSave = false;
 let _bgRefreshDone = false;
 
 // ============================================================
-// データ検証
+// データ検証 / 整形
 // ============================================================
 
 function _hasData(data) {
@@ -35,6 +36,15 @@ function _ensureKeys(data) {
     if (!data || typeof data !== 'object') data = {};
     REQUIRED_KEYS.forEach(k => { if (!Array.isArray(data[k])) data[k] = []; });
     return data;
+}
+
+// PUT/書き込み前に REQUIRED_KEYS だけ抽出（他ツールのキーを絶対に混入させない）
+function _stripToRequiredKeys(data) {
+    const clean = {};
+    REQUIRED_KEYS.forEach(k => {
+        clean[k] = Array.isArray(data && data[k]) ? data[k] : [];
+    });
+    return clean;
 }
 
 function _countItems(data) {
@@ -58,7 +68,6 @@ function _getBackups() {
             }
         } catch (e) { /* skip */ }
     }
-    // 新しい順にソート
     backups.sort((a, b) => b.ts - a.ts);
     return backups;
 }
@@ -66,17 +75,14 @@ function _getBackups() {
 function _saveBackup(data) {
     if (!_hasData(data)) return;
 
-    // 現在のバックアップを取得
     const backups = _getBackups();
 
-    // 直前のバックアップと同じなら保存しない（無駄な世代消費を防ぐ）
     if (backups.length > 0) {
         const lastStr = JSON.stringify(backups[0].data);
         const newStr = JSON.stringify(data);
         if (lastStr === newStr) return;
     }
 
-    // 世代をローテーション（3→破棄、2→3、1→2、新規→1）
     try {
         for (let i = BACKUP_MAX; i >= 2; i--) {
             const prev = localStorage.getItem(LS_BACKUP_PREFIX + (i - 1));
@@ -96,7 +102,7 @@ function _saveBackup(data) {
 }
 
 // ============================================================
-// 復元UI（データ空 + バックアップありの時に自動表示）
+// 復元UI
 // ============================================================
 
 function _showRestoreUI(backups) {
@@ -173,7 +179,6 @@ function _showRestoreUI(backups) {
         </div>
     `;
 
-    // グローバル復元関数
     window._jbRestore = async function(slot) {
         try {
             const raw = localStorage.getItem(LS_BACKUP_PREFIX + slot);
@@ -195,14 +200,14 @@ function _showRestoreUI(backups) {
             _cache = data;
             _lsWrite(data);
 
-            // JSONBinにも書き戻す
+            const payload = _stripToRequiredKeys(data);
             const res = await fetch(JSONBIN_BASE, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
                     'X-Master-Key': JSONBIN_API_KEY
                 },
-                body: JSON.stringify(data)
+                body: JSON.stringify(payload)
             });
             if (!res.ok) throw new Error('JSONBin保存失敗');
 
@@ -283,7 +288,7 @@ function _statusLoading()  { _showStatus('📡', 'データ取得中...', '#065f
 function _statusCached()   { _showStatus('⚡', 'キャッシュから読み込み', '#6b7280', '#f3f4f6', 2000); }
 
 // ============================================================
-// localStorage ヘルパー
+// localStorage
 // ============================================================
 
 function _lsRead() {
@@ -319,7 +324,7 @@ function _lsWrite(data) {
 }
 
 // ============================================================
-// JSONBin取得ヘルパー
+// JSONBin取得
 // ============================================================
 
 async function _fetchFromJsonBin() {
@@ -380,7 +385,6 @@ function _bgRefresh() {
 // ============================================================
 
 async function jbLoad() {
-    // 1) キャッシュに有効なデータがあれば即採用
     const lsData = _lsRead();
     if (lsData) {
         _cache = lsData;
@@ -389,7 +393,6 @@ async function jbLoad() {
         return _cache;
     }
 
-    // 2) キャッシュなし → JSONBinから取得
     _statusLoading();
     try {
         const data = await _fetchFromJsonBin();
@@ -403,7 +406,6 @@ async function jbLoad() {
             return _cache;
         }
 
-        // JSONBinも空 → バックアップがあれば復元UI表示
         console.warn('⚠️ JSONBinもキャッシュも空');
         const backups = _getBackups();
         if (backups.length > 0) {
@@ -417,7 +419,6 @@ async function jbLoad() {
         console.error('JSONBin読み込みエラー:', e);
         _statusOffline();
 
-        // オフライン時もバックアップがあれば復元UI
         const backups = _getBackups();
         if (backups.length > 0) {
             _showRestoreUI(backups);
@@ -444,13 +445,15 @@ async function jbSave(data) {
     _saving = true;
     _statusSaving();
     try {
+        // 自分のキーだけにフィルタしてPUT（他ツールのキー混入を防止）
+        const payload = _stripToRequiredKeys(data);
         const res = await fetch(JSONBIN_BASE, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
                 'X-Master-Key': JSONBIN_API_KEY
             },
-            body: JSON.stringify(data)
+            body: JSON.stringify(payload)
         });
         if (!res.ok) throw new Error(`JSONBin保存失敗: ${res.status}`);
         _statusSaved();
